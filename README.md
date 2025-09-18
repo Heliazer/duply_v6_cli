@@ -16,17 +16,52 @@ Herramienta eficiente para clasificar automáticamente archivos PDF por temas ut
 1. **Clonar o descargar** los archivos del proyecto
 
 2. **Instalar dependencias**:
-```bash
-pip install -r requirements.txt
-```
+
+   **Opción A: Instalación completa (recomendada)**
+   ```bash
+   pip install -r requirements.txt
+   ```
+   Incluye interfaz colorida, menús interactivos y todas las funcionalidades.
+
+   **Opción B: Instalación mínima**
+   ```bash
+   pip install -r requirements-minimal.txt
+   ```
+   Solo funcionalidades básicas por línea de comandos.
 
 3. **Configurar API key**:
    - Obtén tu clave de API de Google Gemini en: https://makersuite.google.com/app/apikey
    - El archivo `.env` ya está configurado con tu API key
 
+### 🔧 Dependencias incluidas
+
+#### Principales:
+- `google-generativeai` - API de Google Gemini para clasificación IA
+- `PyMuPDF` - Extracción de texto de archivos PDF
+- `python-dotenv` - Manejo de variables de entorno
+
+#### Interfaz visual:
+- `colorama` - Colores en terminal (multiplataforma)
+- `rich` - Interfaz rica con tablas, barras de progreso y menús
+
 ## 💻 Uso
 
-### Uso básico desde línea de comandos
+### 🎨 Menú Interactivo Colorido (Recomendado)
+
+```bash
+# Lanzar menú interactivo
+python main.py
+```
+
+El menú interactivo incluye:
+- 🎨 **Interfaz colorida y atractiva**
+- 📋 **Menú de opciones intuitivo**
+- 🔄 **Barras de progreso en tiempo real**
+- 📊 **Resultados visuales**
+- ⚙️ **Configuración guiada**
+- ❓ **Ayuda integrada**
+
+### 💻 Línea de Comandos (Uso Avanzado)
 
 ```bash
 # Clasificar PDFs en una carpeta
@@ -37,6 +72,9 @@ python pdf_classifier.py /ruta/a/carpeta/con/pdfs --batch-size 3
 
 # Especificar directorio de salida
 python pdf_classifier.py /ruta/a/carpeta/con/pdfs --output mis_resultados
+
+# O usar el punto de entrada principal
+python main.py /ruta/a/carpeta/con/pdfs --organize
 ```
 
 ### Uso programático

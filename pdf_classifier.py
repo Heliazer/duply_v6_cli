@@ -19,6 +19,8 @@ import json
 import time
 import csv
 import logging
+import shutil
+import re
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime
@@ -55,6 +57,31 @@ class PDFClassifier:
         self.logger = logging.getLogger(__name__)
 
         self._configure_gemini()
+
+    def _sanitize_folder_name(self, name: str) -> str:
+        """
+        Limpia el nombre para crear carpetas válidas.
+
+        Args:
+            name: Nombre a limpiar
+
+        Returns:
+            Nombre válido para carpeta
+        """
+        if not name or name.lower() in ['n/a', 'na', 'none', 'null']:
+            return "Sin_Clasificar"
+
+        # Remover caracteres especiales y reemplazar espacios
+        sanitized = re.sub(r'[<>:"/\\|?*]', '', name)
+        sanitized = re.sub(r'\s+', '_', sanitized.strip())
+
+        # Limitar longitud
+        sanitized = sanitized[:50]
+
+        # Capitalizar primera letra de cada palabra
+        sanitized = '_'.join(word.capitalize() for word in sanitized.split('_') if word)
+
+        return sanitized or "Sin_Clasificar"
 
     def _configure_gemini(self):
         """Configura la API de Google Gemini."""
@@ -326,6 +353,166 @@ class PDFClassifier:
 
         self.logger.info(f"Resultados guardados en CSV: {csv_file}")
 
+    def organize_files_by_classification(self, results: List[Dict], source_folder: Path,
+                                       organized_folder: Path = None) -> Dict[str, int]:
+        """
+        Organiza los archivos PDF en carpetas basadas en su clasificación.
+
+        Args:
+            results: Lista de resultados de clasificación
+            source_folder: Carpeta origen con los PDFs
+            organized_folder: Carpeta destino para la organización
+
+        Returns:
+            Diccionario con estadísticas de organización
+        """
+        if organized_folder is None:
+            organized_folder = source_folder.parent / f"{source_folder.name}_clasificado"
+
+        organized_folder.mkdir(exist_ok=True)
+        no_clasificados_folder = organized_folder / "no_clasificados"
+        no_clasificados_folder.mkdir(exist_ok=True)
+
+        stats = {
+            "total_processed": 0,
+            "successfully_organized": 0,
+            "moved_to_unclassified": 0,
+            "errors": 0,
+            "folders_created": set()
+        }
+
+        self.logger.info(f"Organizando archivos en: {organized_folder}")
+
+        # Organizar archivos clasificados
+        for result in results:
+            stats["total_processed"] += 1
+            archivo = result.get('archivo', '')
+
+            if not archivo:
+                stats["errors"] += 1
+                continue
+
+            source_file = source_folder / archivo
+
+            if not source_file.exists():
+                self.logger.warning(f"Archivo no encontrado: {archivo}")
+                stats["errors"] += 1
+                continue
+
+            try:
+                # Determinar carpeta destino
+                tema_general = result.get('tema_general', '')
+                subtema = result.get('subtema', '')
+
+                if not tema_general or tema_general.lower() in ['n/a', 'na', 'none']:
+                    # Mover a no_clasificados
+                    dest_file = no_clasificados_folder / archivo
+                    shutil.copy2(source_file, dest_file)
+                    stats["moved_to_unclassified"] += 1
+                    self.logger.info(f"Movido a no_clasificados: {archivo}")
+                else:
+                    # Crear estructura de carpetas
+                    tema_folder = self._sanitize_folder_name(tema_general)
+                    subtema_folder = self._sanitize_folder_name(subtema) if subtema else None
+
+                    if subtema_folder and subtema_folder != "Sin_Clasificar":
+                        dest_folder = organized_folder / tema_folder / subtema_folder
+                    else:
+                        dest_folder = organized_folder / tema_folder
+
+                    dest_folder.mkdir(parents=True, exist_ok=True)
+                    stats["folders_created"].add(str(dest_folder))
+
+                    dest_file = dest_folder / archivo
+                    shutil.copy2(source_file, dest_file)
+                    stats["successfully_organized"] += 1
+
+                    self.logger.info(f"Organizado: {archivo} → {dest_folder.name}")
+
+            except Exception as e:
+                self.logger.error(f"Error organizando {archivo}: {e}")
+                stats["errors"] += 1
+
+        # Buscar archivos no clasificados (que no aparecen en results)
+        classified_files = {result.get('archivo', '') for result in results}
+        all_pdfs = list(source_folder.glob("*.pdf"))
+
+        for pdf_file in all_pdfs:
+            if pdf_file.name not in classified_files:
+                try:
+                    dest_file = no_clasificados_folder / pdf_file.name
+                    shutil.copy2(pdf_file, dest_file)
+                    stats["moved_to_unclassified"] += 1
+                    self.logger.info(f"Archivo no clasificado movido: {pdf_file.name}")
+                except Exception as e:
+                    self.logger.error(f"Error moviendo archivo no clasificado {pdf_file.name}: {e}")
+                    stats["errors"] += 1
+
+        # Convertir set a count para el reporte
+        stats["folders_created"] = len(stats["folders_created"])
+
+        self.logger.info(f"Organización completada:")
+        self.logger.info(f"  - Archivos organizados: {stats['successfully_organized']}")
+        self.logger.info(f"  - Movidos a no_clasificados: {stats['moved_to_unclassified']}")
+        self.logger.info(f"  - Carpetas creadas: {stats['folders_created']}")
+        self.logger.info(f"  - Errores: {stats['errors']}")
+
+        return stats
+
+    def classify_and_organize(self, folder_path: str, output_dir: str = "results",
+                            organize_files: bool = True, organized_folder: str = None) -> Dict:
+        """
+        Clasifica PDFs y opcionalmente los organiza en carpetas.
+
+        Args:
+            folder_path: Ruta a la carpeta con PDFs
+            output_dir: Directorio para guardar resultados
+            organize_files: Si True, organiza los archivos en carpetas
+            organized_folder: Carpeta personalizada para organización
+
+        Returns:
+            Diccionario con estadísticas completas
+        """
+        # Primero clasificar
+        classification_stats = self.classify_pdfs_in_folder(folder_path, output_dir)
+
+        if not organize_files or classification_stats["processed"] == 0:
+            return classification_stats
+
+        # Cargar resultados de la clasificación más reciente
+        output_dir_path = Path(output_dir)
+        json_files = list(output_dir_path.glob("clasificacion_*.json"))
+
+        if not json_files:
+            self.logger.warning("No se encontraron archivos de clasificación para organizar")
+            return classification_stats
+
+        # Usar el archivo más reciente
+        latest_json = max(json_files, key=lambda x: x.stat().st_mtime)
+
+        with open(latest_json, 'r', encoding='utf-8') as f:
+            results = json.load(f)
+
+        # Organizar archivos
+        folder_path = Path(folder_path)
+        if organized_folder:
+            organized_folder_path = Path(organized_folder)
+        else:
+            organized_folder_path = folder_path.parent / f"{folder_path.name}_clasificado"
+
+        organization_stats = self.organize_files_by_classification(
+            results, folder_path, organized_folder_path
+        )
+
+        # Combinar estadísticas
+        combined_stats = {
+            **classification_stats,
+            "organization": organization_stats,
+            "organized_folder": str(organized_folder_path)
+        }
+
+        return combined_stats
+
 
 def main():
     """Función principal del script."""
@@ -335,12 +522,27 @@ def main():
     parser.add_argument("folder", help="Carpeta con archivos PDF a clasificar")
     parser.add_argument("--batch-size", type=int, default=5, help="Tamaño del lote (default: 5)")
     parser.add_argument("--output", default="results", help="Directorio de salida (default: results)")
+    parser.add_argument("--organize", action="store_true", help="Organizar archivos en carpetas por tema")
+    parser.add_argument("--organized-folder", help="Carpeta personalizada para organización")
+    parser.add_argument("--no-organize", action="store_true", help="Solo clasificar, no organizar archivos")
 
     args = parser.parse_args()
 
     try:
         classifier = PDFClassifier(batch_size=args.batch_size)
-        stats = classifier.classify_pdfs_in_folder(args.folder, args.output)
+
+        # Determinar si organizar archivos
+        organize_files = args.organize or (not args.no_organize)
+
+        if organize_files:
+            stats = classifier.classify_and_organize(
+                folder_path=args.folder,
+                output_dir=args.output,
+                organize_files=True,
+                organized_folder=args.organized_folder
+            )
+        else:
+            stats = classifier.classify_pdfs_in_folder(args.folder, args.output)
 
         print("\n" + "="*50)
         print("RESUMEN DE PROCESAMIENTO")
@@ -349,6 +551,16 @@ def main():
         print(f"Procesados exitosamente: {stats['processed']}")
         print(f"Errores: {stats['errors']}")
         print(f"Tasa de éxito: {stats['success_rate']:.1f}%")
+
+        # Mostrar estadísticas de organización si están disponibles
+        if 'organization' in stats:
+            org_stats = stats['organization']
+            print("\n--- ORGANIZACIÓN DE ARCHIVOS ---")
+            print(f"Archivos organizados por tema: {org_stats['successfully_organized']}")
+            print(f"Movidos a 'no_clasificados': {org_stats['moved_to_unclassified']}")
+            print(f"Carpetas creadas: {org_stats['folders_created']}")
+            print(f"Carpeta de organización: {stats.get('organized_folder', 'N/A')}")
+
         print("="*50)
 
     except Exception as e:

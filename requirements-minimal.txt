@@ -1,0 +1,4 @@
+# Dependencias mínimas para el funcionamiento básico (solo línea de comandos)
+google-generativeai>=0.3.0
+PyMuPDF>=1.23.0
+python-dotenv>=1.0.0
