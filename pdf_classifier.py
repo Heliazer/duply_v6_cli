@@ -21,6 +21,7 @@ import csv
 import logging
 import shutil
 import re
+import tempfile
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime
@@ -44,17 +45,40 @@ class PDFClassifier:
         self.batch_size = batch_size
         self.model = None
         self.results = []
+        self.temp_dir = None
+        self.pdf_location_map = {}  # Mapeo de archivos temporales a ubicaciones originales
+
+        # Generar timestamp para esta sesión
+        self.session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # Crear carpeta para logs si no existe
+        logs_dir = Path("logs")
+        logs_dir.mkdir(exist_ok=True)
+
+        self.general_log_file = f"logs/pdf_classifier_{self.session_timestamp}.log"
+        self.api_log_file = f"logs/api_requests_{self.session_timestamp}.log"
 
         # Configurar logging
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[
-                logging.FileHandler('pdf_classifier.log'),
+                logging.FileHandler(self.general_log_file, encoding='utf-8'),
                 logging.StreamHandler()
             ]
         )
         self.logger = logging.getLogger(__name__)
+
+        # Configurar logger específico para requests de API
+        self.api_logger = logging.getLogger(f'api_requests_{self.session_timestamp}')
+        self.api_logger.setLevel(logging.INFO)
+
+        # Handler para el log de API (archivo separado)
+        api_handler = logging.FileHandler(self.api_log_file, encoding='utf-8')
+        api_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        api_handler.setFormatter(api_formatter)
+        self.api_logger.addHandler(api_handler)
+        self.api_logger.propagate = False  # Evitar duplicados en consola
 
         self._configure_gemini()
 
@@ -95,6 +119,94 @@ class PDFClassifier:
         except Exception as e:
             self.logger.error(f"Error al configurar la API de Gemini: {e}")
             raise
+
+    def collect_pdfs_recursively(self, root_folder: Path) -> Tuple[Path, Dict[str, str], int]:
+        """
+        Recolecta recursivamente todos los PDFs de una carpeta y subcarpetas,
+        los copia a una carpeta temporal para análisis eficiente.
+
+        Args:
+            root_folder: Carpeta raíz donde buscar PDFs
+
+        Returns:
+            Tupla con (carpeta_temporal, mapeo_ubicaciones, total_archivos)
+        """
+        root_folder = Path(root_folder)
+        if not root_folder.exists() or not root_folder.is_dir():
+            raise ValueError(f"La carpeta no existe o no es válida: {root_folder}")
+
+        # Crear carpeta temporal
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="pdf_classifier_"))
+        self.pdf_location_map = {}
+
+        total_files = 0
+        copied_files = 0
+
+        self.logger.info(f"🔍 Escaneando recursivamente la carpeta: {root_folder}")
+        self.logger.info(f"📁 Carpeta temporal creada: {self.temp_dir}")
+
+        # Buscar todos los PDFs recursivamente
+        pdf_files = list(root_folder.rglob("*.pdf"))
+        total_files = len(pdf_files)
+
+        if total_files == 0:
+            self.logger.warning(f"❌ No se encontraron archivos PDF en: {root_folder}")
+            return self.temp_dir, self.pdf_location_map, 0
+
+        self.logger.info(f"📊 Encontrados {total_files} archivos PDF")
+
+        # Copiar cada PDF a la carpeta temporal
+        for pdf_file in pdf_files:
+            try:
+                # Crear nombre único para evitar conflictos
+                relative_path = pdf_file.relative_to(root_folder)
+                safe_name = str(relative_path).replace(os.sep, "_")
+
+                # Agregar timestamp si el nombre ya existe
+                temp_pdf_name = f"{copied_files:04d}_{safe_name}"
+                temp_pdf_path = self.temp_dir / temp_pdf_name
+
+                # Copiar el archivo
+                shutil.copy2(pdf_file, temp_pdf_path)
+
+                # Guardar mapeo de ubicación original
+                self.pdf_location_map[temp_pdf_name] = {
+                    'original_path': str(pdf_file),
+                    'relative_path': str(relative_path),
+                    'parent_folder': str(pdf_file.parent),
+                    'original_name': pdf_file.name
+                }
+
+                copied_files += 1
+
+                if copied_files % 10 == 0:
+                    self.logger.info(f"📋 Copiados {copied_files}/{total_files} archivos...")
+
+            except Exception as e:
+                self.logger.error(f"❌ Error copiando {pdf_file}: {e}")
+                continue
+
+        self.logger.info(f"✅ Proceso completado: {copied_files}/{total_files} archivos copiados")
+
+        # Guardar mapeo en archivo JSON para referencia
+        mapping_file = self.temp_dir / "ubicaciones_originales.json"
+        with open(mapping_file, 'w', encoding='utf-8') as f:
+            json.dump(self.pdf_location_map, f, indent=2, ensure_ascii=False)
+
+        return self.temp_dir, self.pdf_location_map, copied_files
+
+    def cleanup_temp_folder(self):
+        """
+        Limpia la carpeta temporal después del procesamiento.
+        """
+        if self.temp_dir and self.temp_dir.exists():
+            try:
+                shutil.rmtree(self.temp_dir)
+                self.logger.info(f"🧹 Carpeta temporal eliminada: {self.temp_dir}")
+                self.temp_dir = None
+                self.pdf_location_map = {}
+            except Exception as e:
+                self.logger.error(f"❌ Error eliminando carpeta temporal: {e}")
 
     def extract_text_from_pdf(self, pdf_path: Path, num_pages: int = 20, max_chars: int = 15000) -> Optional[str]:
         """
@@ -169,7 +281,19 @@ class PDFClassifier:
         """
 
         try:
+            # Log del request
+            filenames = [filename for _, filename in texts_and_files]
+            self.api_logger.info(f"=== NUEVO REQUEST A LA API ===")
+            self.api_logger.info(f"Archivos en el lote: {filenames}")
+            self.api_logger.info(f"Cantidad de archivos: {len(texts_and_files)}")
+            self.api_logger.info(f"Prompt enviado (primeros 500 chars): {prompt[:500]}...")
+
+            # Hacer el request
             response = self.model.generate_content(prompt)
+
+            # Log de la respuesta
+            self.api_logger.info(f"✅ Respuesta recibida exitosamente")
+            self.api_logger.info(f"Respuesta completa: {response.text}")
 
             # Limpiar respuesta
             json_text = response.text.strip()
@@ -186,13 +310,40 @@ class PDFClassifier:
             if not isinstance(classifications, list):
                 raise ValueError("La respuesta no es una lista válida")
 
+            # Log de éxito
+            self.api_logger.info(f"✅ JSON parseado correctamente. {len(classifications)} clasificaciones obtenidas")
+
+            # Log detallado de cada clasificación
+            for i, classification in enumerate(classifications):
+                filename = filenames[i] if i < len(filenames) else "archivo_desconocido"
+                self.api_logger.info(f"  📁 {filename}: {classification.get('tema_general', 'N/A')} > {classification.get('subtema', 'N/A')} > {classification.get('tema_especifico', 'N/A')} (Confianza: {classification.get('confianza', 'N/A')})")
+
+            self.api_logger.info(f"=== FIN REQUEST EXITOSO ===\n")
+
             return classifications
 
         except json.JSONDecodeError as e:
+            # Log de error de JSON
+            self.api_logger.error(f"❌ ERROR DE PARSEO JSON")
+            self.api_logger.error(f"Error: {e}")
+            self.api_logger.error(f"Respuesta que causó el error: {response.text}")
+            self.api_logger.error(f"Archivos afectados: {filenames}")
+            self.api_logger.error(f"=== FIN REQUEST CON ERROR JSON ===\n")
+
             self.logger.error(f"Error al parsear JSON de la API: {e}")
             self.logger.debug(f"Respuesta recibida: {response.text}")
             return None
+
         except Exception as e:
+            # Log de error general
+            self.api_logger.error(f"❌ ERROR EN LLAMADA A LA API")
+            self.api_logger.error(f"Error: {str(e)}")
+            self.api_logger.error(f"Tipo de error: {type(e).__name__}")
+            self.api_logger.error(f"Archivos afectados: {filenames}")
+            if 'response' in locals():
+                self.api_logger.error(f"Respuesta (si existe): {getattr(response, 'text', 'Sin respuesta')}")
+            self.api_logger.error(f"=== FIN REQUEST CON ERROR GENERAL ===\n")
+
             self.logger.error(f"Error en llamada a la API: {e}")
             return None
 
@@ -218,11 +369,14 @@ class PDFClassifier:
 
             if texto and len(texto.strip()) > 50:
                 texts_and_files.append((texto, pdf_file.name))
+                self.api_logger.info(f"📄 Texto extraído exitosamente de: {pdf_file.name} ({len(texto)} chars)")
             else:
                 self.logger.warning(f"Saltando archivo '{pdf_file.name}' (texto insuficiente)")
+                self.api_logger.warning(f"⚠️  Archivo saltado por texto insuficiente: {pdf_file.name} (chars: {len(texto) if texto else 0})")
 
         if not texts_and_files:
             self.logger.warning("Lote vacío, no hay texto válido para clasificar")
+            self.api_logger.warning(f"⚠️  LOTE VACÍO: Ningún archivo del lote tuvo texto válido para clasificar")
             return []
 
         # Clasificar con IA
@@ -282,6 +436,16 @@ class PDFClassifier:
         self.logger.info(f"Encontrados {len(pdf_files)} archivos PDF")
         self.logger.info(f"Procesando en lotes de {self.batch_size}")
 
+        # Log de inicio de sesión en el archivo de API
+        self.api_logger.info(f"🚀 NUEVA SESIÓN DE CLASIFICACIÓN INICIADA")
+        self.api_logger.info(f"Fecha y hora: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        self.api_logger.info(f"Carpeta de origen: {folder_path}")
+        self.api_logger.info(f"Carpeta de salida: {output_dir}")
+        self.api_logger.info(f"Total de archivos PDF encontrados: {len(pdf_files)}")
+        self.api_logger.info(f"Tamaño de lote configurado: {self.batch_size}")
+        self.api_logger.info(f"Archivos a procesar: {[f.name for f in pdf_files]}")
+        self.api_logger.info(f"=" * 80)
+
         # Procesar en lotes
         all_results = []
         processed_count = 0
@@ -316,6 +480,28 @@ class PDFClassifier:
 
         self.logger.info(f"Procesamiento completado: {processed_count}/{len(pdf_files)} archivos")
         self.logger.info(f"Tasa de éxito: {stats['success_rate']:.1f}%")
+
+        # Log de fin de sesión en el archivo de API
+        self.api_logger.info(f"=" * 80)
+        self.api_logger.info(f"🏁 SESIÓN DE CLASIFICACIÓN COMPLETADA")
+        self.api_logger.info(f"Fecha y hora de finalización: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        self.api_logger.info(f"📊 ESTADÍSTICAS FINALES:")
+        self.api_logger.info(f"  Total de archivos: {len(pdf_files)}")
+        self.api_logger.info(f"  Archivos procesados exitosamente: {processed_count}")
+        self.api_logger.info(f"  Archivos con errores: {error_count}")
+        self.api_logger.info(f"  Tasa de éxito: {stats['success_rate']:.1f}%")
+        self.api_logger.info(f"  Resultados guardados en: {output_dir}")
+        self.api_logger.info(f"  Log general: {self.general_log_file}")
+        self.api_logger.info(f"  Log de API: {self.api_log_file}")
+        self.api_logger.info(f"🎯 FIN DE SESIÓN")
+        self.api_logger.info(f"=" * 100 + "\n")
+
+        # Agregar información de logs a las estadísticas
+        stats['log_files'] = {
+            'general_log': self.general_log_file,
+            'api_log': self.api_log_file,
+            'session_timestamp': self.session_timestamp
+        }
 
         return stats
 
