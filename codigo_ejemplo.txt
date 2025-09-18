@@ -1,0 +1,155 @@
+# ----------------------------------------------------------------------------------
+# CLASIFICADOR TEMÁTICO DE LIBROS PDF POR LOTES CON GOOGLE GEMINI
+# ----------------------------------------------------------------------------------
+# Este script analiza una carpeta de PDFs en lotes de 5, extrae el texto inicial
+# de cada uno y utiliza la API de Google Gemini para clasificarlos en una
+# sola llamada por lote.
+#
+# Requisitos:
+# pip install google-generativeai PyMuPDF
+# ----------------------------------------------------------------------------------
+
+import os
+import json
+import time
+import fitz  # PyMuPDF
+import google.generativeai as genai
+
+# --- 1. CONFIGURACIÓN INICIAL ---
+# TODO: Reemplaza con tu clave de API.
+GOOGLE_API_KEY = "TU_API_KEY_AQUI"
+
+# TODO: Reemplaza con la ruta a tu carpeta de PDFs.
+CARPETA_PDFS = "/ruta/a/tu/carpeta/de/libros"
+
+# Tamaño del lote (cuántos PDFs procesar por cada llamada a la API)
+TAMAÑO_LOTE = 5
+
+# --- 2. CONFIGURACIÓN DEL MODELO DE IA ---
+try:
+    genai.configure(api_key=GOOGLE_API_KEY)
+    model = genai.GenerativeModel('gemini-1.5-flash')
+except Exception as e:
+    print(f"Error al configurar la API de Gemini: {e}")
+    exit()
+
+# --- 3. FUNCIONES PRINCIPALES ---
+
+def extraer_texto_de_pdf(ruta_pdf, num_paginas=5, max_caracteres=10000):
+    """Extrae el texto de las primeras 'num_paginas' de un PDF."""
+    try:
+        with fitz.open(ruta_pdf) as documento:
+            texto_completo = ""
+            for i in range(min(num_paginas, documento.page_count)):
+                texto_completo += documento.load_page(i).get_text()
+        return texto_completo[:max_caracteres]
+    except Exception as e:
+        print(f"  [ERROR] No se pudo leer el PDF '{os.path.basename(ruta_pdf)}': {e}")
+        return None
+
+def clasificar_lote_con_ia(textos_del_lote):
+    """Construye un prompt para un lote y obtiene las clasificaciones."""
+    
+    prompt_documentos = ""
+    for i, texto in enumerate(textos_del_lote):
+        prompt_documentos += f"--- DOCUMENTO {i+1} ---\n{texto}\n\n"
+
+    prompt = f"""
+    Analiza los {len(textos_del_lote)} textos de documentos que te proporciono a continuación. Para cada uno, clasifícalo en una jerarquía de 3 niveles.
+
+    {prompt_documentos}
+
+    Responde ÚNICAMENTE con un array (lista) de objetos JSON, uno por cada documento en el mismo orden en que fueron presentados. La estructura debe ser la siguiente:
+    [
+        {{
+            "documento": 1,
+            "tema_general": "...",
+            "subtema": "...",
+            "tema_especifico": "..."
+        }},
+        {{
+            "documento": 2,
+            "tema_general": "...",
+            "subtema": "...",
+            "tema_especifico": "..."
+        }}
+    ]
+    """
+    
+    try:
+        response = model.generate_content(prompt)
+        json_text = response.text.replace("```json", "").replace("```", "").strip()
+        return json.loads(json_text)
+    except Exception as e:
+        print(f"  [ERROR] La API no respondió correctamente para el lote: {e}")
+        return None
+
+def procesar_lote(lote_de_archivos, carpeta_base):
+    """Extrae texto de un lote de archivos y los envía a clasificar."""
+    print(f"--- Procesando Lote de {len(lote_de_archivos)} archivos ---")
+    
+    textos_para_prompt = []
+    archivos_procesados = []
+    
+    for nombre_archivo in lote_de_archivos:
+        ruta_completa = os.path.join(carpeta_base, nombre_archivo)
+        texto = extraer_texto_de_pdf(ruta_completa)
+        if texto:
+            textos_para_prompt.append(texto)
+            archivos_procesados.append(nombre_archivo)
+        else:
+            print(f"  -> Saltando archivo '{nombre_archivo}' (no se pudo extraer texto).")
+
+    if not textos_para_prompt:
+        print("  -> Lote vacío, no hay nada que clasificar.\n")
+        return
+
+    resultados = clasificar_lote_con_ia(textos_para_prompt)
+    
+    if resultados and isinstance(resultados, list):
+        for i, archivo in enumerate(archivos_procesados):
+            print(f"  Archivo: {archivo}")
+            resultado_doc = resultados[i] if i < len(resultados) else {}
+            print(f"    -> Tema General:    {resultado_doc.get('tema_general', 'N/A')}")
+            print(f"    -> Subtema:         {resultado_doc.get('subtema', 'N/A')}")
+            print(f"    -> Tema Específico: {resultado_doc.get('tema_especifico', 'N/A')}")
+        print("")
+    else:
+        print("  -> No se recibieron resultados válidos para este lote.\n")
+
+# --- 4. SCRIPT PRINCIPAL ---
+
+def main():
+    """Función principal que orquesta el proceso de clasificación por lotes."""
+    print("--- INICIANDO CLASIFICADOR DE LIBROS PDF POR LOTES ---")
+    
+    if not os.path.isdir(CARPETA_PDFS):
+        print(f"[ERROR CRÍTICO] La carpeta no existe: {CARPETA_PDFS}")
+        return
+
+    archivos_pdf = [f for f in os.listdir(CARPETA_PDFS) if f.lower().endswith(".pdf")]
+    
+    if not archivos_pdf:
+        print("No se encontraron archivos PDF en la carpeta.")
+        return
+
+    print(f"Se encontraron {len(archivos_pdf)} archivos PDF. Se procesarán en lotes de {TAMAÑO_LOTE}.\n")
+
+    lote_actual = []
+    for nombre_archivo in archivos_pdf:
+        lote_actual.append(nombre_archivo)
+        if len(lote_actual) == TAMAÑO_LOTE:
+            procesar_lote(lote_actual, CARPETA_PDFS)
+            lote_actual = []
+            # Pausa entre cada lote para respetar el límite de RPM
+            print(f"*** Pausa de 2 segundos antes del siguiente lote... ***\n")
+            time.sleep(2)
+
+    # Procesa los archivos restantes que no completaron un lote
+    if lote_actual:
+        procesar_lote(lote_actual, CARPETA_PDFS)
+
+    print("--- PROCESO DE CLASIFICACIÓN FINALIZADO ---")
+
+if __name__ == "__main__":
+    main()
