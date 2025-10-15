@@ -95,62 +95,67 @@ class MenuColorido:
 
     def _mostrar_menu_rich(self):
         """Menú principal con Rich."""
-        table = Table(show_header=False, box=box.ROUNDED, border_style="bright_green")
-        table.add_column("Opción", style="bold cyan", width=8)
-        table.add_column("Descripción", style="white")
-        table.add_column("Estado", style="yellow", width=15)
+        self.console.print(Text("MENÚ PRINCIPAL", style="bold bright_blue"))
+        self.console.print(Text("─" * 64, style="bright_black"))
 
-        # Estado de configuración
-        api_status = "✅ Configurado" if os.getenv('GOOGLE_API_KEY') else "❌ Falta API Key"
-        carpeta_status = f"📁 {self.carpeta_actual}" if self.carpeta_actual else "❌ No seleccionada"
+        api_status = "API key configurada" if os.getenv('GOOGLE_API_KEY') else "API key pendiente"
+        carpeta_status = f"Ruta seleccionada: {self.carpeta_actual}" if self.carpeta_actual else "Ruta no seleccionada"
 
-        table.add_row("1", "🗂️  Seleccionar carpeta de PDFs", carpeta_status)
-        table.add_row("2", "🔍 Clasificar PDFs únicamente", "")
-        table.add_row("3", "🗂️  Clasificar y organizar automáticamente", "⭐ Recomendado")
-        table.add_row("4", "📊 Ver resultados anteriores", "")
-        table.add_row("5", "⚙️  Configuración avanzada", api_status)
-        table.add_row("6", "❓ Ayuda y ejemplos", "")
-        table.add_row("0", "🚪 Salir", "")
+        opciones = [
+            ("1", "Seleccionar carpeta de PDFs", carpeta_status, "cyan"),
+            ("2", "Consolidar PDFs recursivamente", "Nuevo", "magenta"),
+            ("3", "Clasificar PDFs únicamente", "", ""),
+            ("4", "Clasificar y organizar automáticamente", "Recomendado", "green"),
+            ("5", "Restaurar desde consolidación", "", ""),
+            ("6", "Ver resultados anteriores", "", ""),
+            ("7", "Configuración avanzada", api_status, "yellow"),
+            ("8", "Ayuda y ejemplos", "", ""),
+            ("0", "Salir", "", ""),
+        ]
 
-        panel = Panel(
-            table,
-            title="[bold blue]📋 MENÚ PRINCIPAL[/bold blue]",
-            border_style="bright_green"
-        )
+        for numero, descripcion, estado, estado_color in opciones:
+            linea = Text()
+            linea.append(f"{numero}. ", style="bold bright_white")
+            linea.append(descripcion, style="bold white" if numero == "4" else "white")
+            if estado:
+                linea.append("  ")
+                linea.append(estado, style=f"bold {estado_color}" if estado_color else "bold bright_black")
+            self.console.print(linea)
 
-        self.console.print(panel)
+        self.console.print(Text("─" * 64, style="bright_black"))
 
         return Prompt.ask(
             "\n[bold yellow]Selecciona una opción[/bold yellow]",
-            choices=["0", "1", "2", "3", "4", "5", "6"],
-            default="3"
+            choices=["0", "1", "2", "3", "4", "5", "6", "7", "8"],
+            default="4"
         )
 
     def _mostrar_menu_simple(self):
         """Menú principal simple."""
-        print(Fore.GREEN + Style.BRIGHT + "📋 MENÚ PRINCIPAL")
-        print(Fore.CYAN + "=" * 50)
+        print(Fore.CYAN + Style.BRIGHT + "MENÚ PRINCIPAL")
+        print(Fore.BLUE + "─" * 50)
 
-        # Estado
-        api_status = "✅" if os.getenv('GOOGLE_API_KEY') else "❌"
-        carpeta_status = f"📁 {self.carpeta_actual}" if self.carpeta_actual else "❌"
+        api_status = "API key configurada" if os.getenv('GOOGLE_API_KEY') else "API key pendiente"
+        carpeta_status = f"Ruta seleccionada: {self.carpeta_actual}" if self.carpeta_actual else "Ruta no seleccionada"
 
-        print(f"1. 🗂️  Seleccionar carpeta de PDFs          {carpeta_status}")
-        print(f"2. 🔍 Clasificar PDFs únicamente")
-        print(f"3. 🗂️  Clasificar y organizar automáticamente  ⭐ Recomendado")
-        print(f"4. 📊 Ver resultados anteriores")
-        print(f"5. ⚙️  Configuración avanzada              {api_status}")
-        print(f"6. ❓ Ayuda y ejemplos")
-        print(f"0. 🚪 Salir")
-        print(Fore.CYAN + "=" * 50)
+        print(Fore.WHITE + f"1. Seleccionar carpeta de PDFs              {carpeta_status}")
+        print(Fore.WHITE + "2. Consolidar PDFs recursivamente           Nuevo")
+        print(Fore.WHITE + "3. Clasificar PDFs únicamente")
+        print(Fore.WHITE + Style.BRIGHT + "4. Clasificar y organizar automáticamente   Recomendado")
+        print(Fore.WHITE + "5. Restaurar desde consolidación")
+        print(Fore.WHITE + "6. Ver resultados anteriores")
+        print(Fore.WHITE + f"7. Configuración avanzada                   {api_status}")
+        print(Fore.WHITE + "8. Ayuda y ejemplos")
+        print(Fore.WHITE + "0. Salir")
+        print(Fore.BLUE + "─" * 50)
 
         while True:
-            opcion = input(Fore.YELLOW + "Selecciona una opción (0-6, default=3): ").strip()
+            opcion = input(Fore.YELLOW + "Selecciona una opción (0-8, default=4): ").strip()
             if not opcion:
-                return "3"
-            if opcion in ["0", "1", "2", "3", "4", "5", "6"]:
+                return "4"
+            if opcion in ["0", "1", "2", "3", "4", "5", "6", "7", "8"]:
                 return opcion
-            print(Fore.RED + "❌ Opción inválida. Intenta de nuevo.")
+            print(Fore.RED + "Opción inválida. Intenta de nuevo.")
 
     def seleccionar_carpeta(self):
         """Permite al usuario seleccionar una carpeta de PDFs."""
@@ -326,7 +331,9 @@ class MenuColorido:
             results_table.add_row("", "")  # Separador
             results_table.add_row("🗂️ Organizados por tema", str(org_stats['successfully_organized']))
             results_table.add_row("❓ Movidos a 'no_clasificados'", str(org_stats['moved_to_unclassified']))
-            results_table.add_row("📁 Carpetas creadas", str(org_stats['folders_created']))
+            results_table.add_row("📁 Carpetas nuevas creadas", str(org_stats['folders_created']))
+            if 'folders_reused' in org_stats:
+                results_table.add_row("♻️ Carpetas reutilizadas", str(org_stats['folders_reused']))
 
         panel = Panel(
             results_table,
@@ -354,7 +361,9 @@ class MenuColorido:
             print(Fore.YELLOW + "\n--- ORGANIZACIÓN DE ARCHIVOS ---")
             print(f"🗂️ Organizados por tema: {org_stats['successfully_organized']}")
             print(f"❓ Movidos a 'no_clasificados': {org_stats['moved_to_unclassified']}")
-            print(f"📁 Carpetas creadas: {org_stats['folders_created']}")
+            print(f"📁 Carpetas nuevas creadas: {org_stats['folders_created']}")
+            if 'folders_reused' in org_stats:
+                print(f"♻️ Carpetas reutilizadas: {org_stats['folders_reused']}")
 
         if 'organized_folder' in stats:
             print(Fore.BLUE + f"\n📂 Archivos organizados en: {stats['organized_folder']}")
@@ -417,6 +426,237 @@ class MenuColorido:
 
         input("\nPresiona Enter para continuar...")
 
+    def consolidar_pdfs_recursivamente(self):
+        """Consolida PDFs de múltiples carpetas en una sola."""
+        if RICH_AVAILABLE:
+            self.console.print("\n[bold blue]📦 CONSOLIDACIÓN RECURSIVA DE PDFs[/bold blue]")
+        else:
+            print(Fore.BLUE + Style.BRIGHT + "\n📦 CONSOLIDACIÓN RECURSIVA DE PDFs")
+
+        if RICH_AVAILABLE:
+            carpeta_origen = Prompt.ask("\n[yellow]Carpeta raíz para buscar PDFs recursivamente[/yellow]")
+        else:
+            carpeta_origen = input(Fore.YELLOW + "\nCarpeta raíz para buscar PDFs recursivamente: ")
+
+        if not carpeta_origen:
+            return
+
+        carpeta_origen_path = Path(carpeta_origen).expanduser()
+
+        if not carpeta_origen_path.exists():
+            if RICH_AVAILABLE:
+                self.console.print(f"[red]❌ La carpeta no existe: {carpeta_origen_path}[/red]")
+            else:
+                print(Fore.RED + f"❌ La carpeta no existe: {carpeta_origen_path}")
+            input("Presiona Enter para continuar...")
+            return
+
+        # Previsualizar archivos encontrados
+        pdf_files = list(carpeta_origen_path.rglob("*.pdf"))
+
+        if not pdf_files:
+            if RICH_AVAILABLE:
+                self.console.print(f"[yellow]⚠️  No se encontraron archivos PDF en: {carpeta_origen_path}[/yellow]")
+            else:
+                print(Fore.YELLOW + f"⚠️  No se encontraron archivos PDF en: {carpeta_origen_path}")
+            input("Presiona Enter para continuar...")
+            return
+
+        # Mostrar previsualización
+        if RICH_AVAILABLE:
+            self.console.print(f"\n[green]📊 Se encontraron {len(pdf_files)} archivos PDF[/green]")
+
+            if len(pdf_files) <= 10:
+                self.console.print("\n[cyan]Archivos encontrados:[/cyan]")
+                for pdf_file in pdf_files[:10]:
+                    relative_path = pdf_file.relative_to(carpeta_origen_path)
+                    self.console.print(f"  📄 {relative_path}")
+            else:
+                self.console.print(f"\n[cyan]Mostrando primeros 10 de {len(pdf_files)} archivos:[/cyan]")
+                for pdf_file in pdf_files[:10]:
+                    relative_path = pdf_file.relative_to(carpeta_origen_path)
+                    self.console.print(f"  📄 {relative_path}")
+                self.console.print(f"  ... y {len(pdf_files) - 10} más")
+
+            carpeta_destino = Prompt.ask(
+                "\n[yellow]Carpeta destino para consolidación (Enter para automática)[/yellow]",
+                default=""
+            )
+
+            if not Confirm.ask("\n[yellow]¿Confirmar consolidación? Los archivos se MOVERÁN[/yellow]", default=False):
+                return
+        else:
+            print(Fore.GREEN + f"\n📊 Se encontraron {len(pdf_files)} archivos PDF")
+
+            if len(pdf_files) <= 10:
+                print(Fore.CYAN + "\nArchivos encontrados:")
+                for pdf_file in pdf_files[:10]:
+                    relative_path = pdf_file.relative_to(carpeta_origen_path)
+                    print(f"  📄 {relative_path}")
+            else:
+                print(Fore.CYAN + f"\nMostrando primeros 10 de {len(pdf_files)} archivos:")
+                for pdf_file in pdf_files[:10]:
+                    relative_path = pdf_file.relative_to(carpeta_origen_path)
+                    print(f"  📄 {relative_path}")
+                print(f"  ... y {len(pdf_files) - 10} más")
+
+            carpeta_destino = input(Fore.YELLOW + "\nCarpeta destino para consolidación (Enter para automática): ")
+
+            confirmacion = input(Fore.YELLOW + "\n¿Confirmar consolidación? Los archivos se MOVERÁN (s/N): ").lower()
+            if confirmacion not in ['s', 'si', 'sí', 'y', 'yes']:
+                return
+
+        try:
+            # Ejecutar consolidación
+            if RICH_AVAILABLE:
+                self.console.print("\n[bold green]🚀 INICIANDO CONSOLIDACIÓN...[/bold green]")
+            else:
+                print(Fore.GREEN + Style.BRIGHT + "\n🚀 INICIANDO CONSOLIDACIÓN...")
+
+            classifier = PDFClassifier()
+
+            stats = classifier.consolidate_pdfs_recursively(
+                source_folder=str(carpeta_origen_path),
+                consolidated_folder=carpeta_destino if carpeta_destino else None
+            )
+
+            # Mostrar resultados
+            self.mostrar_resultados_consolidacion(stats)
+
+        except Exception as e:
+            if RICH_AVAILABLE:
+                self.console.print(f"[red]❌ Error durante la consolidación: {e}[/red]")
+            else:
+                print(Fore.RED + f"❌ Error durante la consolidación: {e}")
+
+        input("\nPresiona Enter para continuar...")
+
+    def restaurar_consolidacion(self):
+        """Restaura archivos desde una consolidación."""
+        if RICH_AVAILABLE:
+            self.console.print("\n[bold blue]🔄 RESTAURAR DESDE CONSOLIDACIÓN[/bold blue]")
+        else:
+            print(Fore.BLUE + Style.BRIGHT + "\n🔄 RESTAURAR DESDE CONSOLIDACIÓN")
+
+        if RICH_AVAILABLE:
+            carpeta_consolidada = Prompt.ask("\n[yellow]Carpeta con archivos consolidados[/yellow]")
+        else:
+            carpeta_consolidada = input(Fore.YELLOW + "\nCarpeta con archivos consolidados: ")
+
+        if not carpeta_consolidada:
+            return
+
+        carpeta_path = Path(carpeta_consolidada).expanduser()
+
+        if not carpeta_path.exists():
+            if RICH_AVAILABLE:
+                self.console.print(f"[red]❌ La carpeta no existe: {carpeta_path}[/red]")
+            else:
+                print(Fore.RED + f"❌ La carpeta no existe: {carpeta_path}")
+            input("Presiona Enter para continuar...")
+            return
+
+        # Verificar archivo de registro
+        registry_file = carpeta_path / "registry_origenes.json"
+
+        if not registry_file.exists():
+            if RICH_AVAILABLE:
+                self.console.print(f"[red]❌ No se encontró archivo de registro en: {registry_file}[/red]")
+            else:
+                print(Fore.RED + f"❌ No se encontró archivo de registro en: {registry_file}")
+            input("Presiona Enter para continuar...")
+            return
+
+        try:
+            # Leer información de consolidación
+            with open(registry_file, 'r', encoding='utf-8') as f:
+                registry_data = json.load(f)
+
+            consolidation_info = registry_data.get("consolidation_info", {})
+            file_origins = registry_data.get("file_origins", {})
+
+            # Mostrar información
+            if RICH_AVAILABLE:
+                info_table = Table(show_header=False, box=box.SIMPLE)
+                info_table.add_column("Info", style="cyan")
+                info_table.add_column("Valor", style="white")
+
+                info_table.add_row("📁 Carpeta original", consolidation_info.get("source_folder", "N/A"))
+                info_table.add_row("📦 Fecha consolidación", consolidation_info.get("consolidation_date", "N/A"))
+                info_table.add_row("📄 Total archivos", str(len(file_origins)))
+
+                self.console.print(Panel(info_table, title="[bold yellow]📋 Información de Consolidación[/bold yellow]"))
+
+                if not Confirm.ask("\n[yellow]¿Confirmar restauración?[/yellow]", default=False):
+                    return
+            else:
+                print(Fore.YELLOW + "\n📋 Información de Consolidación:")
+                print(f"📁 Carpeta original: {consolidation_info.get('source_folder', 'N/A')}")
+                print(f"📦 Fecha consolidación: {consolidation_info.get('consolidation_date', 'N/A')}")
+                print(f"📄 Total archivos: {len(file_origins)}")
+
+                confirmacion = input(Fore.YELLOW + "\n¿Confirmar restauración? (s/N): ").lower()
+                if confirmacion not in ['s', 'si', 'sí', 'y', 'yes']:
+                    return
+
+            # Ejecutar restauración
+            if RICH_AVAILABLE:
+                self.console.print("\n[bold green]🔄 INICIANDO RESTAURACIÓN...[/bold green]")
+            else:
+                print(Fore.GREEN + Style.BRIGHT + "\n🔄 INICIANDO RESTAURACIÓN...")
+
+            classifier = PDFClassifier()
+            stats = classifier.restore_from_consolidation(str(carpeta_path))
+
+            # Mostrar resultados
+            if RICH_AVAILABLE:
+                self.console.print(f"\n[green]✅ Restauración completada: {stats['successfully_restored']}/{stats['total_to_restore']}[/green]")
+            else:
+                print(Fore.GREEN + f"\n✅ Restauración completada: {stats['successfully_restored']}/{stats['total_to_restore']}")
+
+        except Exception as e:
+            if RICH_AVAILABLE:
+                self.console.print(f"[red]❌ Error durante la restauración: {e}[/red]")
+            else:
+                print(Fore.RED + f"❌ Error durante la restauración: {e}")
+
+        input("\nPresiona Enter para continuar...")
+
+    def mostrar_resultados_consolidacion(self, stats):
+        """Muestra los resultados de la consolidación."""
+        if RICH_AVAILABLE:
+            results_table = Table(show_header=False, box=box.ROUNDED, border_style="green")
+            results_table.add_column("Métrica", style="bold cyan")
+            results_table.add_column("Valor", style="bold white")
+
+            results_table.add_row("📁 Archivos encontrados", str(stats['total_found']))
+            results_table.add_row("✅ Archivos movidos", str(stats['successfully_moved']))
+            results_table.add_row("🔄 Duplicados manejados", str(stats['duplicates_handled']))
+            results_table.add_row("📂 Carpetas procesadas", str(stats['folders_processed']))
+            results_table.add_row("🗑️ Carpetas vacías eliminadas", str(stats.get('empty_folders_removed', 0)))
+            results_table.add_row("❌ Errores", str(stats['errors']))
+
+            panel = Panel(
+                results_table,
+                title="[bold green]📦 RESULTADOS DE LA CONSOLIDACIÓN[/bold green]",
+                border_style="bright_green"
+            )
+
+            self.console.print("\n" + "="*60)
+            self.console.print(panel)
+            self.console.print(f"\n[bold blue]📂 Archivos consolidados en: {stats['consolidated_folder']}[/bold blue]")
+
+        else:
+            print(Fore.GREEN + Style.BRIGHT + "\n📦 RESULTADOS DE LA CONSOLIDACIÓN")
+            print(Fore.CYAN + "=" * 60)
+            print(f"📁 Archivos encontrados: {stats['total_found']}")
+            print(f"✅ Archivos movidos: {stats['successfully_moved']}")
+            print(f"🔄 Duplicados manejados: {stats['duplicates_handled']}")
+            print(f"📂 Carpetas procesadas: {stats['folders_processed']}")
+            print(f"🗑️ Carpetas vacías eliminadas: {stats.get('empty_folders_removed', 0)}")
+            print(f"❌ Errores: {stats['errors']}")
+            print(Fore.BLUE + f"\n📂 Archivos consolidados en: {stats['consolidated_folder']}")
+
     def ejecutar(self):
         """Ejecuta el menú principal del programa."""
         while True:
@@ -436,18 +676,24 @@ class MenuColorido:
                 self.seleccionar_carpeta()
 
             elif opcion == "2":
-                self.ejecutar_clasificacion(organizar=False)
+                self.consolidar_pdfs_recursivamente()
 
             elif opcion == "3":
-                self.ejecutar_clasificacion(organizar=True)
+                self.ejecutar_clasificacion(organizar=False)
 
             elif opcion == "4":
-                self.ver_resultados_anteriores()
+                self.ejecutar_clasificacion(organizar=True)
 
             elif opcion == "5":
-                self.configuracion_avanzada()
+                self.restaurar_consolidacion()
 
             elif opcion == "6":
+                self.ver_resultados_anteriores()
+
+            elif opcion == "7":
+                self.configuracion_avanzada()
+
+            elif opcion == "8":
                 self.mostrar_ayuda()
 
     def ver_resultados_anteriores(self):

@@ -44,6 +44,7 @@ class PDFClassifier:
         self.batch_size = batch_size
         self.model = None
         self.results = []
+        self.existing_folders_cache = set()  # Cache de carpetas ya creadas
 
         # Configurar logging
         logging.basicConfig(
@@ -82,6 +83,67 @@ class PDFClassifier:
         sanitized = '_'.join(word.capitalize() for word in sanitized.split('_') if word)
 
         return sanitized or "Sin_Clasificar"
+
+    def _initialize_folders_cache(self, organized_folder: Path):
+        """
+        Inicializa el cache con carpetas existentes para evitar verificaciones repetitivas.
+
+        Args:
+            organized_folder: Carpeta base de organización
+        """
+        self.existing_folders_cache.clear()
+
+        if organized_folder.exists():
+            # Recorrer todas las carpetas existentes y agregarlas al cache
+            for root, dirs, files in os.walk(organized_folder):
+                root_path = Path(root)
+                self.existing_folders_cache.add(str(root_path))
+
+                # Agregar también las subcarpetas
+                for dir_name in dirs:
+                    subfolder_path = root_path / dir_name
+                    self.existing_folders_cache.add(str(subfolder_path))
+
+        self.logger.info(f"Cache inicializado con {len(self.existing_folders_cache)} carpetas existentes")
+
+    def _create_folder_if_needed(self, folder_path: Path) -> bool:
+        """
+        Crea una carpeta solo si no existe, usando cache para optimizar.
+
+        Args:
+            folder_path: Ruta de la carpeta a crear
+
+        Returns:
+            bool: True si la carpeta se creó o ya existía, False si hubo error
+        """
+        folder_str = str(folder_path)
+
+        # Verificar cache primero
+        if folder_str in self.existing_folders_cache:
+            return True
+
+        # Si no está en cache, verificar si existe físicamente
+        if folder_path.exists():
+            # Agregar al cache para futuras verificaciones
+            self.existing_folders_cache.add(folder_str)
+            return True
+
+        # Crear la carpeta y sus padres si es necesario
+        try:
+            folder_path.mkdir(parents=True, exist_ok=True)
+
+            # Agregar al cache la carpeta y todas sus carpetas padre
+            current_path = folder_path
+            while current_path != current_path.parent:
+                self.existing_folders_cache.add(str(current_path))
+                current_path = current_path.parent
+
+            self.logger.debug(f"Carpeta creada: {folder_path}")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error creando carpeta {folder_path}: {e}")
+            return False
 
     def _configure_gemini(self):
         """Configura la API de Google Gemini."""
@@ -357,6 +419,7 @@ class PDFClassifier:
                                        organized_folder: Path = None) -> Dict[str, int]:
         """
         Organiza los archivos PDF en carpetas basadas en su clasificación.
+        Optimizado para evitar duplicación de carpetas y usar cache.
 
         Args:
             results: Lista de resultados de clasificación
@@ -369,9 +432,15 @@ class PDFClassifier:
         if organized_folder is None:
             organized_folder = source_folder.parent / f"{source_folder.name}_clasificado"
 
-        organized_folder.mkdir(exist_ok=True)
+        # Crear carpeta principal usando método optimizado
+        self._create_folder_if_needed(organized_folder)
+
+        # Inicializar cache de carpetas existentes
+        self._initialize_folders_cache(organized_folder)
+
+        # Crear carpeta de no clasificados
         no_clasificados_folder = organized_folder / "no_clasificados"
-        no_clasificados_folder.mkdir(exist_ok=True)
+        self._create_folder_if_needed(no_clasificados_folder)
 
         stats = {
             "total_processed": 0,
@@ -411,7 +480,7 @@ class PDFClassifier:
                     stats["moved_to_unclassified"] += 1
                     self.logger.info(f"Movido a no_clasificados: {archivo}")
                 else:
-                    # Crear estructura de carpetas
+                    # Crear estructura de carpetas usando método optimizado
                     tema_folder = self._sanitize_folder_name(tema_general)
                     subtema_folder = self._sanitize_folder_name(subtema) if subtema else None
 
@@ -420,14 +489,20 @@ class PDFClassifier:
                     else:
                         dest_folder = organized_folder / tema_folder
 
-                    dest_folder.mkdir(parents=True, exist_ok=True)
-                    stats["folders_created"].add(str(dest_folder))
+                    # Usar método optimizado para crear carpeta
+                    if self._create_folder_if_needed(dest_folder):
+                        stats["folders_created"].add(str(dest_folder))
 
-                    dest_file = dest_folder / archivo
-                    shutil.copy2(source_file, dest_file)
-                    stats["successfully_organized"] += 1
+                        dest_file = dest_folder / archivo
+                        shutil.copy2(source_file, dest_file)
+                        stats["successfully_organized"] += 1
 
-                    self.logger.info(f"Organizado: {archivo} → {dest_folder.name}")
+                        # Log más informativo
+                        relative_path = dest_folder.relative_to(organized_folder)
+                        self.logger.info(f"Organizado: {archivo} → {relative_path}")
+                    else:
+                        self.logger.error(f"No se pudo crear carpeta para {archivo}")
+                        stats["errors"] += 1
 
             except Exception as e:
                 self.logger.error(f"Error organizando {archivo}: {e}")
@@ -448,14 +523,30 @@ class PDFClassifier:
                     self.logger.error(f"Error moviendo archivo no clasificado {pdf_file.name}: {e}")
                     stats["errors"] += 1
 
-        # Convertir set a count para el reporte
-        stats["folders_created"] = len(stats["folders_created"])
+        # Preparar estadísticas finales
+        unique_folders = stats["folders_created"]
+        total_folders_created = len(unique_folders)
+        cached_folders_used = len(self.existing_folders_cache) - total_folders_created
 
+        # Convertir set a count para el reporte
+        stats["folders_created"] = total_folders_created
+        stats["folders_reused"] = max(0, cached_folders_used)
+
+        # Log detallado de resultados
         self.logger.info(f"Organización completada:")
         self.logger.info(f"  - Archivos organizados: {stats['successfully_organized']}")
         self.logger.info(f"  - Movidos a no_clasificados: {stats['moved_to_unclassified']}")
-        self.logger.info(f"  - Carpetas creadas: {stats['folders_created']}")
+        self.logger.info(f"  - Carpetas nuevas creadas: {stats['folders_created']}")
+        self.logger.info(f"  - Carpetas existentes reutilizadas: {stats['folders_reused']}")
+        self.logger.info(f"  - Total en cache: {len(self.existing_folders_cache)}")
         self.logger.info(f"  - Errores: {stats['errors']}")
+
+        # Log de carpetas únicas creadas (solo si son pocas)
+        if total_folders_created <= 10:
+            self.logger.info("Nuevas carpetas creadas:")
+            for folder_path in sorted(unique_folders):
+                relative_path = Path(folder_path).relative_to(organized_folder)
+                self.logger.info(f"  → {relative_path}")
 
         return stats
 
@@ -512,6 +603,267 @@ class PDFClassifier:
         }
 
         return combined_stats
+
+    def consolidate_pdfs_recursively(self, source_folder: str, consolidated_folder: str = None) -> Dict:
+        """
+        Consolida todos los PDFs de una estructura de carpetas recursiva en una sola carpeta.
+        Los archivos se MUEVEN (no copian) para optimizar espacio y evitar duplicados.
+
+        Args:
+            source_folder: Carpeta raíz para buscar PDFs recursivamente
+            consolidated_folder: Carpeta destino para consolidación
+
+        Returns:
+            Diccionario con estadísticas y registro de orígenes
+        """
+        source_path = Path(source_folder)
+
+        if not source_path.exists() or not source_path.is_dir():
+            raise ValueError(f"La carpeta origen no existe o no es válida: {source_folder}")
+
+        # Crear carpeta de consolidación
+        if consolidated_folder is None:
+            consolidated_folder = source_path.parent / f"{source_path.name}_consolidado"
+        else:
+            consolidated_folder = Path(consolidated_folder)
+
+        self._create_folder_if_needed(consolidated_folder)
+
+        # Estadísticas y registro
+        stats = {
+            "total_found": 0,
+            "successfully_moved": 0,
+            "errors": 0,
+            "duplicates_handled": 0,
+            "folders_processed": 0,
+            "origin_registry": {},  # archivo -> ruta_original
+            "consolidated_folder": str(consolidated_folder)
+        }
+
+        # Archivo de registro de orígenes
+        registry_file = consolidated_folder / "registry_origenes.json"
+
+        self.logger.info(f"Iniciando consolidación recursiva desde: {source_path}")
+        self.logger.info(f"Consolidando en: {consolidated_folder}")
+
+        # Buscar todos los PDFs recursivamente
+        pdf_files = list(source_path.rglob("*.pdf"))
+        stats["total_found"] = len(pdf_files)
+
+        if not pdf_files:
+            self.logger.warning(f"No se encontraron archivos PDF en: {source_path}")
+            return stats
+
+        self.logger.info(f"Encontrados {len(pdf_files)} archivos PDF para consolidar")
+
+        # Procesar cada PDF
+        folders_seen = set()
+
+        for pdf_file in pdf_files:
+            try:
+                # Registrar carpeta procesada
+                folder_path = pdf_file.parent
+                if folder_path not in folders_seen:
+                    folders_seen.add(folder_path)
+                    stats["folders_processed"] += 1
+
+                # Determinar nombre destino (manejar duplicados)
+                dest_filename = self._get_unique_filename(
+                    consolidated_folder,
+                    pdf_file.name,
+                    pdf_file.parent
+                )
+
+                dest_file = consolidated_folder / dest_filename
+
+                # Registrar origen
+                relative_origin = pdf_file.relative_to(source_path)
+                stats["origin_registry"][dest_filename] = {
+                    "original_path": str(pdf_file),
+                    "relative_path": str(relative_origin),
+                    "original_folder": str(pdf_file.parent),
+                    "moved_timestamp": datetime.now().isoformat(),
+                    "file_size": pdf_file.stat().st_size
+                }
+
+                # Mover archivo (no copiar)
+                shutil.move(str(pdf_file), str(dest_file))
+                stats["successfully_moved"] += 1
+
+                self.logger.info(f"Movido: {relative_origin} → {dest_filename}")
+
+                # Si el nombre cambió por duplicado
+                if dest_filename != pdf_file.name:
+                    stats["duplicates_handled"] += 1
+                    self.logger.info(f"  → Renombrado por duplicado: {pdf_file.name} → {dest_filename}")
+
+            except Exception as e:
+                self.logger.error(f"Error moviendo {pdf_file}: {e}")
+                stats["errors"] += 1
+
+        # Guardar registro de orígenes
+        try:
+            with open(registry_file, 'w', encoding='utf-8') as f:
+                json.dump({
+                    "consolidation_info": {
+                        "source_folder": str(source_path),
+                        "consolidated_folder": str(consolidated_folder),
+                        "consolidation_date": datetime.now().isoformat(),
+                        "total_files": stats["successfully_moved"]
+                    },
+                    "file_origins": stats["origin_registry"]
+                }, f, indent=2, ensure_ascii=False)
+
+            self.logger.info(f"Registro de orígenes guardado en: {registry_file}")
+
+        except Exception as e:
+            self.logger.error(f"Error guardando registro de orígenes: {e}")
+
+        # Limpiar carpetas vacías (opcional)
+        self._cleanup_empty_folders(source_path, stats)
+
+        # Log final
+        self.logger.info(f"Consolidación completada:")
+        self.logger.info(f"  - Archivos encontrados: {stats['total_found']}")
+        self.logger.info(f"  - Archivos movidos: {stats['successfully_moved']}")
+        self.logger.info(f"  - Duplicados manejados: {stats['duplicates_handled']}")
+        self.logger.info(f"  - Carpetas procesadas: {stats['folders_processed']}")
+        self.logger.info(f"  - Errores: {stats['errors']}")
+
+        return stats
+
+    def _get_unique_filename(self, dest_folder: Path, filename: str, original_folder: Path) -> str:
+        """
+        Genera un nombre único para evitar sobrescribir archivos con el mismo nombre.
+
+        Args:
+            dest_folder: Carpeta destino
+            filename: Nombre original del archivo
+            original_folder: Carpeta original del archivo
+
+        Returns:
+            Nombre único para el archivo
+        """
+        base_name = filename
+        dest_file = dest_folder / base_name
+
+        # Si no hay conflicto, usar nombre original
+        if not dest_file.exists():
+            return base_name
+
+        # Si hay conflicto, agregar prefijo de carpeta original
+        name_without_ext = Path(filename).stem
+        extension = Path(filename).suffix
+        folder_name = original_folder.name
+
+        # Crear nombre con prefijo de carpeta
+        new_name = f"{folder_name}_{name_without_ext}{extension}"
+        dest_file = dest_folder / new_name
+
+        # Si aún hay conflicto, agregar contador
+        counter = 1
+        while dest_file.exists():
+            counter_name = f"{folder_name}_{name_without_ext}_{counter:03d}{extension}"
+            dest_file = dest_folder / counter_name
+            counter += 1
+            if counter > 999:  # Límite de seguridad
+                # Usar timestamp como último recurso
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                counter_name = f"{folder_name}_{name_without_ext}_{timestamp}{extension}"
+                break
+
+        return dest_file.name
+
+    def _cleanup_empty_folders(self, source_path: Path, stats: Dict):
+        """
+        Limpia carpetas vacías después de la consolidación.
+
+        Args:
+            source_path: Carpeta raíz
+            stats: Diccionario de estadísticas para actualizar
+        """
+        empty_folders_removed = 0
+
+        try:
+            # Recorrer desde las carpetas más profundas hacia arriba
+            for root, dirs, files in os.walk(source_path, topdown=False):
+                root_path = Path(root)
+
+                # Saltar la carpeta raíz
+                if root_path == source_path:
+                    continue
+
+                # Verificar si la carpeta está vacía
+                if not any(root_path.iterdir()):
+                    try:
+                        root_path.rmdir()
+                        empty_folders_removed += 1
+                        self.logger.info(f"Carpeta vacía eliminada: {root_path.relative_to(source_path)}")
+                    except Exception as e:
+                        self.logger.warning(f"No se pudo eliminar carpeta vacía {root_path}: {e}")
+
+        except Exception as e:
+            self.logger.error(f"Error durante limpieza de carpetas vacías: {e}")
+
+        stats["empty_folders_removed"] = empty_folders_removed
+        if empty_folders_removed > 0:
+            self.logger.info(f"Carpetas vacías eliminadas: {empty_folders_removed}")
+
+    def restore_from_consolidation(self, consolidated_folder: str) -> Dict:
+        """
+        Restaura archivos a sus ubicaciones originales usando el registro.
+
+        Args:
+            consolidated_folder: Carpeta con archivos consolidados
+
+        Returns:
+            Estadísticas de la restauración
+        """
+        consolidated_path = Path(consolidated_folder)
+        registry_file = consolidated_path / "registry_origenes.json"
+
+        if not registry_file.exists():
+            raise ValueError(f"No se encontró archivo de registro en: {registry_file}")
+
+        stats = {
+            "total_to_restore": 0,
+            "successfully_restored": 0,
+            "errors": 0
+        }
+
+        try:
+            with open(registry_file, 'r', encoding='utf-8') as f:
+                registry_data = json.load(f)
+
+            file_origins = registry_data.get("file_origins", {})
+            stats["total_to_restore"] = len(file_origins)
+
+            self.logger.info(f"Iniciando restauración de {len(file_origins)} archivos")
+
+            for consolidated_filename, origin_info in file_origins.items():
+                try:
+                    consolidated_file = consolidated_path / consolidated_filename
+                    original_path = Path(origin_info["original_path"])
+
+                    # Crear carpeta original si no existe
+                    original_path.parent.mkdir(parents=True, exist_ok=True)
+
+                    # Mover archivo de vuelta
+                    shutil.move(str(consolidated_file), str(original_path))
+                    stats["successfully_restored"] += 1
+
+                    self.logger.info(f"Restaurado: {consolidated_filename} → {origin_info['relative_path']}")
+
+                except Exception as e:
+                    self.logger.error(f"Error restaurando {consolidated_filename}: {e}")
+                    stats["errors"] += 1
+
+        except Exception as e:
+            self.logger.error(f"Error leyendo registro: {e}")
+            stats["errors"] += 1
+
+        self.logger.info(f"Restauración completada: {stats['successfully_restored']}/{stats['total_to_restore']}")
+        return stats
 
 
 def main():
