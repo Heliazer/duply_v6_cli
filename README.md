@@ -1,6 +1,6 @@
-# Clasificador de PDFs con Google Gemini
+# Clasificador de PDFs con DeepSeek
 
-Herramienta eficiente para clasificar automáticamente archivos PDF por temas utilizando la API de Google Gemini.
+Herramienta eficiente para clasificar automáticamente archivos PDF por temas utilizando la API de DeepSeek.
 
 ## 🚀 Características
 
@@ -30,13 +30,13 @@ Herramienta eficiente para clasificar automáticamente archivos PDF por temas ut
    Solo funcionalidades básicas por línea de comandos.
 
 3. **Configurar API key**:
-   - Obtén tu clave de API de Google Gemini en: https://makersuite.google.com/app/apikey
-   - El archivo `.env` ya está configurado con tu API key
+   - Obtén tu clave de API de DeepSeek en: https://platform.deepseek.com/api-keys
+   - El archivo `.env` ya está configurado con la variable `DEEPSEEK_API_KEY`
 
 ### 🔧 Dependencias incluidas
 
 #### Principales:
-- `google-generativeai` - API de Google Gemini para clasificación IA
+- `requests` - Cliente HTTP para invocar la API de DeepSeek
 - `PyMuPDF` - Extracción de texto de archivos PDF
 - `python-dotenv` - Manejo de variables de entorno
 
@@ -129,7 +129,7 @@ Los resultados se guardan en dos formatos:
 
 ### Variables de entorno (.env)
 ```
-GOOGLE_API_KEY=tu_api_key_aqui
+DEEPSEEK_API_KEY=tu_api_key_aqui
 ```
 
 ### Parámetros ajustables
@@ -150,7 +150,7 @@ El sistema genera logs detallados en `pdf_classifier.log`:
 
 ### Error de API key
 ```
-ValueError: API key de Google Gemini no encontrada
+ValueError: API key de DeepSeek no encontrada
 ```
 **Solución**: Verificar que el archivo `.env` contiene la clave correcta.
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-CLASIFICADOR TEMÁTICO DE LIBROS PDF POR LOTES CON GOOGLE GEMINI
-================================================================
+CLASIFICADOR TEMÁTICO DE LIBROS PDF POR LOTES CON DEEPSEEK
+=========================================================
 Este script analiza una carpeta de PDFs en lotes, extrae el texto inicial
-de cada uno y utiliza la API de Google Gemini para clasificarlos eficientemente.
+de cada uno y utiliza la API de DeepSeek para clasificarlos eficientemente.
 
 Características:
 - Procesamiento en lotes para optimizar llamadas a la API
@@ -11,7 +11,7 @@ Características:
 - Clasificación jerárquica de 3 niveles
 - Manejo de errores robusto
 - Exportación de resultados a JSON y CSV
-- Configuración flexible via variables de entorno
+- Configuración flexible vía variables de entorno
 """
 
 import os
@@ -24,8 +24,11 @@ import re
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime
+
 import fitz  # PyMuPDF
-import google.generativeai as genai
+import requests
+from requests import Session
+from requests.exceptions import RequestException
 from dotenv import load_dotenv
 
 # Cargar variables de entorno
@@ -37,12 +40,15 @@ class PDFClassifier:
         Inicializa el clasificador de PDFs.
 
         Args:
-            api_key: Clave de API de Google Gemini
+            api_key: Clave de API de DeepSeek
             batch_size: Tamaño del lote para procesamiento
         """
-        self.api_key = api_key or os.getenv('GOOGLE_API_KEY')
+        self.api_key = api_key or os.getenv('DEEPSEEK_API_KEY')
         self.batch_size = batch_size
-        self.model = None
+        self.session: Optional[Session] = None
+        self.base_url = os.getenv('DEEPSEEK_API_BASE', 'https://api.deepseek.com/v1')
+        self.model_name = os.getenv('DEEPSEEK_MODEL', 'deepseek-chat')
+        self.temperature = float(os.getenv('DEEPSEEK_TEMPERATURE', '0.2'))
         self.results = []
         self.existing_folders_cache = set()  # Cache de carpetas ya creadas
 
@@ -57,7 +63,7 @@ class PDFClassifier:
         )
         self.logger = logging.getLogger(__name__)
 
-        self._configure_gemini()
+        self._configure_deepseek()
 
     def _sanitize_folder_name(self, name: str) -> str:
         """
@@ -145,18 +151,18 @@ class PDFClassifier:
             self.logger.error(f"Error creando carpeta {folder_path}: {e}")
             return False
 
-    def _configure_gemini(self):
-        """Configura la API de Google Gemini."""
+    def _configure_deepseek(self):
+        """Configura la sesión para interactuar con la API de DeepSeek."""
         if not self.api_key:
-            raise ValueError("API key de Google Gemini no encontrada. Verificar .env")
+            raise ValueError("API key de DeepSeek no encontrada. Verificar .env")
 
-        try:
-            genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel('gemini-1.5-flash')
-            self.logger.info("API de Gemini configurada correctamente")
-        except Exception as e:
-            self.logger.error(f"Error al configurar la API de Gemini: {e}")
-            raise
+        self.session = requests.Session()
+        self.session.headers.update({
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        })
+
+        self.logger.info("Cliente de DeepSeek configurado correctamente")
 
     def extract_text_from_pdf(self, pdf_path: Path, num_pages: int = 20, max_chars: int = 15000) -> Optional[str]:
         """
@@ -191,7 +197,7 @@ class PDFClassifier:
 
     def classify_batch_with_ai(self, texts_and_files: List[Tuple[str, str]]) -> Optional[List[Dict]]:
         """
-        Clasifica un lote de textos usando la API de Gemini.
+        Clasifica un lote de textos usando la API de DeepSeek.
 
         Args:
             texts_and_files: Lista de tuplas (texto, nombre_archivo)
@@ -230,32 +236,64 @@ class PDFClassifier:
         Asegúrate de que el JSON sea válido y sin texto adicional.
         """
 
-        try:
-            response = self.model.generate_content(prompt)
+        payload = {
+            "model": self.model_name,
+            "temperature": self.temperature,
+            "max_tokens": 2048,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Eres un asistente experto en documentación académica. "
+                        "Responde exclusivamente en formato JSON válido, sin comentarios ni texto adicional."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+        }
 
-            # Limpiar respuesta
-            json_text = response.text.strip()
+        response_content = ""
+
+        try:
+            if not self.session:
+                self._configure_deepseek()
+
+            response = self.session.post(
+                f"{self.base_url}/chat/completions",
+                json=payload,
+                timeout=90,
+            )
+            response.raise_for_status()
+
+            data = response.json()
+            choices = data.get("choices", [])
+            if not choices:
+                raise ValueError("La respuesta de DeepSeek no contiene opciones de salida")
+
+            response_content = choices[0].get("message", {}).get("content", "").strip()
+            if not response_content:
+                raise ValueError("Contenido vacío devuelto por DeepSeek")
+
+            json_text = response_content
             if json_text.startswith("```json"):
                 json_text = json_text[7:]
             if json_text.endswith("```"):
                 json_text = json_text[:-3]
             json_text = json_text.strip()
 
-            # Parsear JSON
             classifications = json.loads(json_text)
 
-            # Validar estructura
             if not isinstance(classifications, list):
                 raise ValueError("La respuesta no es una lista válida")
 
             return classifications
 
         except json.JSONDecodeError as e:
-            self.logger.error(f"Error al parsear JSON de la API: {e}")
-            self.logger.debug(f"Respuesta recibida: {response.text}")
+            self.logger.error(f"Error al parsear JSON de la API DeepSeek: {e}")
+            self.logger.debug(f"Respuesta recibida: {response_content}")
             return None
-        except Exception as e:
-            self.logger.error(f"Error en llamada a la API: {e}")
+        except (RequestException, ValueError) as e:
+            self.logger.error(f"Error en llamada a la API DeepSeek: {e}")
             return None
 
     def process_batch(self, pdf_files: List[Path], folder_path: Path) -> List[Dict]:
@@ -690,12 +728,12 @@ class PDFClassifier:
                 shutil.move(str(pdf_file), str(dest_file))
                 stats["successfully_moved"] += 1
 
-                self.logger.info(f"Movido: {relative_origin} → {dest_filename}")
-
-                # Si el nombre cambió por duplicado
+                # Mostrar solo nombres de archivo, no rutas completas
                 if dest_filename != pdf_file.name:
+                    self.logger.info(f"Movido: {pdf_file.name} → {dest_filename}")
                     stats["duplicates_handled"] += 1
-                    self.logger.info(f"  → Renombrado por duplicado: {pdf_file.name} → {dest_filename}")
+                else:
+                    self.logger.info(f"Movido: {pdf_file.name}")
 
             except Exception as e:
                 self.logger.error(f"Error moviendo {pdf_file}: {e}")
@@ -870,7 +908,7 @@ def main():
     """Función principal del script."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Clasificador temático de PDFs con Google Gemini")
+    parser = argparse.ArgumentParser(description="Clasificador temático de PDFs con DeepSeek")
     parser.add_argument("folder", help="Carpeta con archivos PDF a clasificar")
     parser.add_argument("--batch-size", type=int, default=5, help="Tamaño del lote (default: 5)")
     parser.add_argument("--output", default="results", help="Directorio de salida (default: results)")

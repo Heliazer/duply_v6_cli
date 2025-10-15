@@ -6,8 +6,7 @@ Ejecuta el menú interactivo o comandos directos del clasificador.
 """
 
 import sys
-import os
-from pathlib import Path
+from rich.console import Console
 
 def main():
     """Función principal que determina qué interfaz usar."""
@@ -18,41 +17,30 @@ def main():
         from pdf_classifier import main as classifier_main
         return classifier_main()
 
-    # Si no hay argumentos, mostrar menú interactivo
-    else:
-        try:
-            # Verificar si las dependencias están instaladas
-            try:
-                import rich
-                import colorama
-            except ImportError:
-                print("⚠️  Las dependencias para el menú colorido no están instaladas.")
-                print("Ejecuta: pip install -r requirements.txt")
-                print("\nUsando interfaz básica...")
+    console = Console()
 
-                # Fallback a interfaz CLI básica
-                print("\n🔍 USO BÁSICO:")
-                print("python main.py /ruta/a/carpeta/pdfs")
-                print("python main.py /ruta/a/carpeta/pdfs --organize")
-                return 1
+    try:
+        from menu_interactivo import main as menu_main
+    except ImportError as exc:
+        console.print("[red]❌ No se pudo importar la interfaz Rich.[/red]")
+        console.print("Instala dependencias con `pip install -r requirements.txt` y vuelve a intentarlo.")
+        return 1
 
-            # Ejecutar menú interactivo
-            from menu_interactivo import main as menu_main
-            return menu_main()
-
-        except Exception as e:
-            print(f"❌ Error al iniciar el menú: {e}")
-            print("\n🔍 USO ALTERNATIVO:")
-            print("python pdf_classifier.py /ruta/a/carpeta/pdfs")
-            return 1
+    try:
+        return menu_main()
+    except Exception as e:
+        console.print(f"[red]❌ Error al iniciar el menú interactivo: {e}[/red]")
+        console.print("Como alternativa puedes ejecutar `python pdf_classifier.py /ruta/a/carpeta/pdfs`.")
+        return 1
 
 if __name__ == "__main__":
+    console = Console()
     try:
         exit_code = main()
         sys.exit(exit_code or 0)
     except KeyboardInterrupt:
-        print("\n\n👋 ¡Proceso interrumpido por el usuario!")
+        console.print("\n\n[bold blue]👋 Proceso interrumpido por el usuario[/bold blue]")
         sys.exit(0)
     except Exception as e:
-        print(f"\n❌ Error crítico: {e}")
+        console.print(f"\n[red]❌ Error crítico: {e}[/red]")
         sys.exit(1)

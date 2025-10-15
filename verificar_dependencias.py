@@ -44,7 +44,7 @@ def main():
     # Dependencias principales (requeridas)
     print("\n📦 DEPENDENCIAS PRINCIPALES:")
     dependencias_principales = [
-        ("google.generativeai", "google-generativeai"),
+        ("requests", "requests"),
         ("fitz", "PyMuPDF"),
         ("dotenv", "python-dotenv"),
     ]
@@ -105,7 +105,7 @@ def main():
         try:
             with open(env_file, 'r') as f:
                 content = f.read()
-                if "GOOGLE_API_KEY=" in content and len(content.split("GOOGLE_API_KEY=")[1].split()[0]) > 10:
+                if "DEEPSEEK_API_KEY=" in content and len(content.split("DEEPSEEK_API_KEY=")[1].split()[0]) > 10:
                     print("✅ API Key configurada en .env")
                 else:
                     print("⚠️  API Key en .env parece incompleta")
@@ -113,13 +113,13 @@ def main():
             print("⚠️  No se pudo verificar API Key en .env")
     else:
         print("❌ Archivo .env no encontrado")
-        print("   → Crea un archivo .env con tu GOOGLE_API_KEY")
+        print("   → Crea un archivo .env con tu DEEPSEEK_API_KEY")
 
     # Recomendaciones
     print("\n💡 RECOMENDACIONES:")
     if not principales_ok:
         print("1. Instala las dependencias principales primero")
-        print("2. Configura tu API Key de Google Gemini")
+        print("2. Configura tu API Key de DeepSeek")
         print("3. Prueba el clasificador básico")
     elif not visuales_ok:
         print("1. Considera instalar las dependencias visuales para mejor experiencia")

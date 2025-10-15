@@ -132,11 +132,11 @@ def main():
 
     # Verificar API key
     import os
-    if not os.getenv('GOOGLE_API_KEY'):
-        print("❌ API key no encontrada en .env")
+    if not os.getenv('DEEPSEEK_API_KEY'):
+        print("❌ API key de DeepSeek no encontrada en .env")
         return
 
-    print("✅ API key configurada")
+    print("✅ API key de DeepSeek configurada")
     print()
 
     # Ejecutar ejemplos

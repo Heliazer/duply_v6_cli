@@ -1,8 +1,8 @@
 # Repository Guidelines
-Este repositorio implementa un clasificador por lotes de PDFs basado en Google Gemini. Usa scripts de línea de comandos y un menú interactivo para organizar resultados y registrar métricas de ejecución.
+Este repositorio implementa un clasificador por lotes de PDFs respaldado por la API de DeepSeek. Usa scripts de línea de comandos y un menú interactivo para organizar resultados y registrar métricas de ejecución.
 
 ## Project Structure & Module Organization
-- `pdf_classifier.py` concentra la lógica principal: extracción con PyMuPDF, llamadas a Gemini y organización de carpetas usando `Path`.
+- `pdf_classifier.py` concentra la lógica principal: extracción con PyMuPDF, llamadas a DeepSeek y organización de carpetas usando `Path`.
 - `main.py` y `menu_interactivo.py` exponen la interfaz interactiva; los scripts `ejemplo_uso.py`, `ejemplo_organizacion.py` y `ejemplo_consolidacion.py` demuestran flujos específicos.
 - `results/`, `pdf_clasificado/` y `pdf/` guardan datos de entrada y salidas clasificadas; `pdf_classifier.log` registra trazas de ejecución.
 - `test_optimizacion.py` valida la reutilización de carpetas y sirve de referencia para crear pruebas adicionales.
@@ -31,5 +31,5 @@ python verificar_dependencias.py             # comprueba versiones y prerequisit
 - Para PRs, describir propósito, impacto en la API pública y pasos de prueba; enlazar issues y añadir capturas de consola si afectan a la experiencia interactiva.
 
 ## Security & Configuration Tips
-- Mantener el archivo `.env` fuera del control de versiones y definir `GOOGLE_API_KEY` antes de ejecutar ejemplos.
+- Mantener el archivo `.env` fuera del control de versiones y definir `DEEPSEEK_API_KEY` antes de ejecutar ejemplos.
 - Evitar volcar PDFs sensibles en el repositorio; usar carpetas temporales al escribir nuevas pruebas o ejemplos.

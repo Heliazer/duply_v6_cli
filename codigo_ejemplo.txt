@@ -1,23 +1,27 @@
 # ----------------------------------------------------------------------------------
-# CLASIFICADOR TEMÁTICO DE LIBROS PDF POR LOTES CON GOOGLE GEMINI
+# CLASIFICADOR TEMÁTICO DE LIBROS PDF POR LOTES CON DEEPSEEK
 # ----------------------------------------------------------------------------------
 # Este script analiza una carpeta de PDFs en lotes de 5, extrae el texto inicial
-# de cada uno y utiliza la API de Google Gemini para clasificarlos en una
+# de cada uno y utiliza la API de DeepSeek para clasificarlos en una
 # sola llamada por lote.
 #
 # Requisitos:
-# pip install google-generativeai PyMuPDF
+# pip install requests PyMuPDF python-dotenv
 # ----------------------------------------------------------------------------------
 
 import os
 import json
 import time
 import fitz  # PyMuPDF
-import google.generativeai as genai
+import requests
+from dotenv import load_dotenv
 
 # --- 1. CONFIGURACIÓN INICIAL ---
-# TODO: Reemplaza con tu clave de API.
-GOOGLE_API_KEY = "TU_API_KEY_AQUI"
+# TODO: Reemplaza con tu clave de API o usa .env (DEEPSEEK_API_KEY).
+load_dotenv()
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "TU_API_KEY_AQUI")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+DEEPSEEK_API_BASE = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1")
 
 # TODO: Reemplaza con la ruta a tu carpeta de PDFs.
 CARPETA_PDFS = "/ruta/a/tu/carpeta/de/libros"
@@ -26,12 +30,11 @@ CARPETA_PDFS = "/ruta/a/tu/carpeta/de/libros"
 TAMAÑO_LOTE = 5
 
 # --- 2. CONFIGURACIÓN DEL MODELO DE IA ---
-try:
-    genai.configure(api_key=GOOGLE_API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
-except Exception as e:
-    print(f"Error al configurar la API de Gemini: {e}")
-    exit()
+session = requests.Session()
+session.headers.update({
+    "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+    "Content-Type": "application/json",
+})
 
 # --- 3. FUNCIONES PRINCIPALES ---
 
@@ -76,9 +79,32 @@ def clasificar_lote_con_ia(textos_del_lote):
     ]
     """
     
+    payload = {
+        "model": DEEPSEEK_MODEL,
+        "temperature": 0.2,
+        "max_tokens": 2048,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Eres un asistente experto en clasificación temática. "
+                    "Responde exclusivamente con JSON válido."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+    }
+
     try:
-        response = model.generate_content(prompt)
-        json_text = response.text.replace("```json", "").replace("```", "").strip()
+        response = session.post(
+            f"{DEEPSEEK_API_BASE}/chat/completions",
+            json=payload,
+            timeout=90,
+        )
+        response.raise_for_status()
+        data = response.json()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        json_text = content.replace("```json", "").replace("```", "").strip()
         return json.loads(json_text)
     except Exception as e:
         print(f"  [ERROR] La API no respondió correctamente para el lote: {e}")

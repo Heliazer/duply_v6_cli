@@ -44,7 +44,7 @@ def ejemplo_configuracion_personalizada():
 
     # Configuración personalizada
     classifier = PDFClassifier(
-        api_key=os.getenv('GOOGLE_API_KEY'),  # API key específica
+        api_key=os.getenv('DEEPSEEK_API_KEY'),  # API key específica
         batch_size=2  # Lotes más pequeños
     )
 
@@ -108,12 +108,12 @@ def main():
     print("=" * 50)
 
     # Verificar que tenemos API key
-    if not os.getenv('GOOGLE_API_KEY'):
-        print("❌ API key de Google Gemini no encontrada.")
-        print("   Asegúrate de tener un archivo .env con GOOGLE_API_KEY")
+    if not os.getenv('DEEPSEEK_API_KEY'):
+        print("❌ API key de DeepSeek no encontrada.")
+        print("   Asegúrate de tener un archivo .env con DEEPSEEK_API_KEY")
         return
 
-    print("✅ API key encontrada")
+    print("✅ API key de DeepSeek encontrada")
 
     # Ejecutar ejemplos
     ejemplo_basico()
