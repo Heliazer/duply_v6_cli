@@ -166,11 +166,16 @@ cython_debug/
 # Specific to this project
 # Results and logs
 results/
+pdf_clasificado/
+pdf_classifier.log
 *.log
 
 # PDFs (if you don't want to track them)
 pdf/
 *.pdf
+
+# Local tooling
+.claude/
 
 # OS generated files
 .DS_Store
